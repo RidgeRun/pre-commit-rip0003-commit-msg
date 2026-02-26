@@ -1,0 +1,8 @@
+- id: rip0003
+  name: RIP 3 - Commit Message Standard
+  entry: bin/rip0003-commit-msg.sh
+  language: script
+  stages: [commit-msg]
+  description: |
+      Validates commit messages with `gitlint` using the repository `.gitlint`
+      configuration file.
