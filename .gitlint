@@ -1,0 +1,10 @@
+[general]
+ignore=B6
+
+[title-max-length]
+line-length=50
+
+[title-trailing-punctuation]
+
+[body-max-line-length]
+line-length=72

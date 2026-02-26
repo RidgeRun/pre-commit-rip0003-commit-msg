@@ -14,6 +14,11 @@ set -euo pipefail
 
 log(){ printf "%s\n" "$*" >&2; }
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
+config_path="$repo_root/.gitlint"
+extra_path="$repo_root/gitlint"
+
 msg_filename="${1:-}"
 
 if [[ -z "$msg_filename" ]]; then
@@ -26,4 +31,17 @@ if [[ ! -f "$msg_filename" ]]; then
   exit 1
 fi
 
-exec gitlint --config .gitlint --msg-filename "$msg_filename"
+if [[ ! -f "$config_path" ]]; then
+  log "RIP 3 check failed: gitlint config '$config_path' was not found."
+  exit 1
+fi
+
+if [[ ! -d "$extra_path" ]]; then
+  log "RIP 3 check failed: gitlint rules directory '$extra_path' was not found."
+  exit 1
+fi
+
+exec gitlint \
+  --config "$config_path" \
+  --extra-path "$extra_path" \
+  --msg-filename "$msg_filename"
