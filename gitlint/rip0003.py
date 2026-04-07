@@ -26,6 +26,9 @@ from gitlint.rules import (  # pyright: ignore[reportMissingTypeStubs]
 )
 
 
+MAINLINE_BRANCHES = {"main", "develop"}
+
+
 class _CommitMessage(Protocol):
     title: str | None
     body: str | None
@@ -89,7 +92,7 @@ def _uses_mainline_rules(commit: _Commit) -> bool:
     if git_dir is not None and (git_dir / "MERGE_HEAD").exists():
         return True
 
-    if _current_branch() == "main":
+    if _current_branch() in MAINLINE_BRANCHES:
         return True
 
     return _is_merge_commit(commit)

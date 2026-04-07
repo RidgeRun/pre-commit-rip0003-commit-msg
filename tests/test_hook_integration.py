@@ -308,6 +308,36 @@ class HookIntegrationTests(unittest.TestCase):
 
         self.assert_passes(result)
 
+    def test_develop_branch_commit_with_merge_prefix_passes(self):
+        repo = self.make_consumer_repo()
+        self.run_cmd(["git", "checkout", "-b", "develop"], cwd=repo)
+        self.stage_change(repo)
+
+        result = self.git_commit(repo, VALID_MAIN_MESSAGE)
+
+        self.assert_passes(result)
+
+    def test_develop_branch_commit_without_merge_prefix_fails(self):
+        repo = self.make_consumer_repo()
+        self.run_cmd(["git", "checkout", "-b", "develop"], cwd=repo)
+        self.stage_change(repo)
+
+        result = self.git_commit(repo, VALID_REGULAR_MESSAGE)
+
+        self.assert_fails_with(
+            result,
+            "Merge commits must start with 'feat: ' or 'fix: '",
+        )
+
+    def test_develop_branch_commit_accepts_valid_breaking_change_footer(self):
+        repo = self.make_consumer_repo()
+        self.run_cmd(["git", "checkout", "-b", "develop"], cwd=repo)
+        self.stage_change(repo)
+
+        result = self.git_commit(repo, VALID_BREAKING_MESSAGE)
+
+        self.assert_passes(result)
+
     def test_merge_commit_with_merge_prefix_passes(self):
         repo = self.make_consumer_repo()
         self.create_feature_branch_commit(repo)
