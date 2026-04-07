@@ -26,7 +26,7 @@ from gitlint.rules import (  # pyright: ignore[reportMissingTypeStubs]
 )
 
 
-MAINLINE_BRANCHES = {"main", "develop"}
+MAINLINE_BRANCHES = {"main", "develop", "master"}
 
 
 class _CommitMessage(Protocol):
