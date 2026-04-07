@@ -12,6 +12,9 @@
 
 from __future__ import annotations
 
+from functools import cache
+from pathlib import Path
+import subprocess
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -46,6 +49,52 @@ def _is_merge_commit(commit: _Commit) -> bool:
     return len(commit.parents) > 1
 
 
+@cache
+def _git_dir() -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+
+    git_dir = result.stdout.strip()
+    if not git_dir:
+        return None
+
+    return Path(git_dir).resolve()
+
+
+@cache
+def _current_branch() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return ""
+
+    return result.stdout.strip()
+
+
+def _uses_mainline_rules(commit: _Commit) -> bool:
+    """Return True when RIP-0003 merge/mainline rules should be applied."""
+    git_dir = _git_dir()
+    if git_dir is not None and (git_dir / "MERGE_HEAD").exists():
+        return True
+
+    if _current_branch() == "main":
+        return True
+
+    return _is_merge_commit(commit)
+
+
 class RegularTitleRule(CommitRule):
     """Validate title format for regular (non-merge) commits."""
 
@@ -54,7 +103,7 @@ class RegularTitleRule(CommitRule):
 
     def validate(self, commit: _Commit) -> list[RuleViolation] | None:
         """Reject reserved merge prefixes and enforce capitalized title text."""
-        if _is_merge_commit(commit):
+        if _uses_mainline_rules(commit):
             return None
 
         title = (commit.message.title or "").strip()
@@ -85,7 +134,7 @@ class RegularBodyNoBreakingChange(CommitRule):
 
     def validate(self, commit: _Commit) -> list[RuleViolation] | None:
         """Reject any BREAKING CHANGE footer in regular commits."""
-        if _is_merge_commit(commit):
+        if _uses_mainline_rules(commit):
             return None
 
         lines = (commit.message.full or "").splitlines()
@@ -110,7 +159,7 @@ class MergeTitleRule(CommitRule):
 
     def validate(self, commit: _Commit) -> list[RuleViolation] | None:
         """Require feat/fix prefix and capitalized title content."""
-        if not _is_merge_commit(commit):
+        if not _uses_mainline_rules(commit):
             return None
 
         title = (commit.message.title or "").strip()
@@ -152,7 +201,7 @@ class MergeBreakingChangeFooter(CommitRule):
             for i, line in enumerate(lines, start=1)
             if line.startswith("BREAKING CHANGE")
         ]
-        if not _is_merge_commit(commit) or not bc_lns:
+        if not _uses_mainline_rules(commit) or not bc_lns:
             return None
 
         if len(bc_lns) > 1:
