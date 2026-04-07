@@ -26,6 +26,7 @@ VALID_BREAKING_MESSAGE = (
     "Append RR prefixes to avoid collisions.\n\n"
     "BREAKING CHANGE: clients will need to migrate to the newer API naming.\n"
 )
+MAINLINE_BRANCHES = ("main", "develop", "master")
 
 
 class HookIntegrationTests(unittest.TestCase):
@@ -182,6 +183,23 @@ class HookIntegrationTests(unittest.TestCase):
         result = self.git_commit(repo, message)
         self.assertEqual(0, result.returncode, msg=self.combined_output(result))
 
+    def checkout_mainline_branch(self, repo: Path, branch: str) -> None:
+        if branch == "main":
+            self.run_cmd(["git", "checkout", "main"], cwd=repo)
+            return
+
+        self.run_cmd(["git", "checkout", "-b", branch], cwd=repo)
+
+    def commit_on_mainline_branch(
+        self,
+        branch: str,
+        message: str,
+    ) -> subprocess.CompletedProcess[str]:
+        repo = self.make_consumer_repo()
+        self.checkout_mainline_branch(repo, branch)
+        self.stage_change(repo)
+        return self.git_commit(repo, message)
+
     def assert_passes(self, result: subprocess.CompletedProcess[str]) -> None:
         self.assertEqual(0, result.returncode, msg=self.combined_output(result))
 
@@ -295,62 +313,32 @@ class HookIntegrationTests(unittest.TestCase):
             "Regular commits must not contain 'BREAKING CHANGE: ...'",
         )
 
-    def test_main_branch_commit_with_merge_prefix_passes(self):
-        repo = self.make_consumer_repo()
-        self.stage_change(repo)
+    def test_mainline_branch_commit_with_merge_prefix_passes(self):
+        for branch in MAINLINE_BRANCHES:
+            with self.subTest(branch=branch):
+                result = self.commit_on_mainline_branch(branch, VALID_MAIN_MESSAGE)
+                self.assert_passes(result)
 
-        result = self.git_commit(repo, VALID_MAIN_MESSAGE)
+    def test_mainline_branch_commit_without_merge_prefix_fails(self):
+        for branch in MAINLINE_BRANCHES:
+            with self.subTest(branch=branch):
+                result = self.commit_on_mainline_branch(
+                    branch,
+                    VALID_REGULAR_MESSAGE,
+                )
+                self.assert_fails_with(
+                    result,
+                    "Merge commits must start with 'feat: ' or 'fix: '",
+                )
 
-        self.assert_passes(result)
-
-    def test_main_branch_commit_without_merge_prefix_fails(self):
-        repo = self.make_consumer_repo()
-        self.stage_change(repo)
-
-        result = self.git_commit(repo, VALID_REGULAR_MESSAGE)
-
-        self.assert_fails_with(
-            result,
-            "Merge commits must start with 'feat: ' or 'fix: '",
-        )
-
-    def test_main_branch_commit_accepts_valid_breaking_change_footer(self):
-        repo = self.make_consumer_repo()
-        self.stage_change(repo)
-
-        result = self.git_commit(repo, VALID_BREAKING_MESSAGE)
-
-        self.assert_passes(result)
-
-    def test_develop_branch_commit_with_merge_prefix_passes(self):
-        repo = self.make_consumer_repo()
-        self.run_cmd(["git", "checkout", "-b", "develop"], cwd=repo)
-        self.stage_change(repo)
-
-        result = self.git_commit(repo, VALID_MAIN_MESSAGE)
-
-        self.assert_passes(result)
-
-    def test_develop_branch_commit_without_merge_prefix_fails(self):
-        repo = self.make_consumer_repo()
-        self.run_cmd(["git", "checkout", "-b", "develop"], cwd=repo)
-        self.stage_change(repo)
-
-        result = self.git_commit(repo, VALID_REGULAR_MESSAGE)
-
-        self.assert_fails_with(
-            result,
-            "Merge commits must start with 'feat: ' or 'fix: '",
-        )
-
-    def test_develop_branch_commit_accepts_valid_breaking_change_footer(self):
-        repo = self.make_consumer_repo()
-        self.run_cmd(["git", "checkout", "-b", "develop"], cwd=repo)
-        self.stage_change(repo)
-
-        result = self.git_commit(repo, VALID_BREAKING_MESSAGE)
-
-        self.assert_passes(result)
+    def test_mainline_branch_commit_accepts_valid_breaking_change_footer(self):
+        for branch in MAINLINE_BRANCHES:
+            with self.subTest(branch=branch):
+                result = self.commit_on_mainline_branch(
+                    branch,
+                    VALID_BREAKING_MESSAGE,
+                )
+                self.assert_passes(result)
 
     def test_merge_commit_with_merge_prefix_passes(self):
         repo = self.make_consumer_repo()
