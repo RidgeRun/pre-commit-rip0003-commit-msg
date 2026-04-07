@@ -168,6 +168,20 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, msg=self.combined_output(result))
         self.run_cmd(["git", "checkout", "main"], cwd=repo)
 
+    def create_branch_commit(
+        self,
+        repo: Path,
+        *,
+        branch: str,
+        start_point: str,
+        message: str = VALID_REGULAR_MESSAGE,
+        content: str = "branch change\n",
+    ) -> None:
+        self.run_cmd(["git", "checkout", "-b", branch, start_point], cwd=repo)
+        self.stage_change(repo, content=content)
+        result = self.git_commit(repo, message)
+        self.assertEqual(0, result.returncode, msg=self.combined_output(result))
+
     def assert_passes(self, result: subprocess.CompletedProcess[str]) -> None:
         self.assertEqual(0, result.returncode, msg=self.combined_output(result))
 
@@ -410,4 +424,49 @@ class HookIntegrationTests(unittest.TestCase):
         self.assert_fails_with(
             result,
             "Use exactly 'BREAKING CHANGE: <description>'",
+        )
+
+    def test_merge_into_feature_branch_treats_prefixed_title_as_regular_commit(self):
+        repo = self.make_consumer_repo()
+        self.run_cmd(["git", "checkout", "-b", "feature"], cwd=repo)
+        self.run_cmd(["git", "checkout", "-b", "topic"], cwd=repo)
+        self.stage_change(repo, content="topic change\n")
+        result = self.git_commit(repo, VALID_REGULAR_MESSAGE)
+        self.assert_passes(result)
+        self.run_cmd(["git", "checkout", "feature"], cwd=repo)
+
+        result = self.git_merge(repo, "topic", VALID_MAIN_MESSAGE)
+
+        self.assert_fails_with(
+            result,
+            "Regular commits must not start with 'feat: ' or 'fix: '",
+        )
+
+    def test_merge_into_feature_branch_treats_regular_title_as_valid(self):
+        repo = self.make_consumer_repo()
+        self.run_cmd(["git", "checkout", "-b", "feature"], cwd=repo)
+        self.run_cmd(["git", "checkout", "-b", "topic"], cwd=repo)
+        self.stage_change(repo, content="topic change\n")
+        result = self.git_commit(repo, VALID_REGULAR_MESSAGE)
+        self.assert_passes(result)
+        self.run_cmd(["git", "checkout", "feature"], cwd=repo)
+
+        result = self.git_merge(repo, "topic", VALID_REGULAR_MESSAGE)
+
+        self.assert_passes(result)
+
+    def test_merge_into_feature_branch_rejects_breaking_change_footer_as_regular(self):
+        repo = self.make_consumer_repo()
+        self.run_cmd(["git", "checkout", "-b", "feature"], cwd=repo)
+        self.run_cmd(["git", "checkout", "-b", "topic"], cwd=repo)
+        self.stage_change(repo, content="topic change\n")
+        result = self.git_commit(repo, VALID_REGULAR_MESSAGE)
+        self.assert_passes(result)
+        self.run_cmd(["git", "checkout", "feature"], cwd=repo)
+
+        result = self.git_merge(repo, "topic", VALID_BREAKING_MESSAGE)
+
+        self.assert_fails_with(
+            result,
+            "Regular commits must not contain 'BREAKING CHANGE: ...'",
         )

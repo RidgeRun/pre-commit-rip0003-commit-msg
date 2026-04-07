@@ -53,25 +53,6 @@ def _is_merge_commit(commit: _Commit) -> bool:
 
 
 @cache
-def _git_dir() -> Path | None:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--git-dir"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return None
-
-    git_dir = result.stdout.strip()
-    if not git_dir:
-        return None
-
-    return Path(git_dir).resolve()
-
-
-@cache
 def _current_branch() -> str:
     try:
         result = subprocess.run(
@@ -88,14 +69,8 @@ def _current_branch() -> str:
 
 def _uses_mainline_rules(commit: _Commit) -> bool:
     """Return True when RIP-0003 merge/mainline rules should be applied."""
-    git_dir = _git_dir()
-    if git_dir is not None and (git_dir / "MERGE_HEAD").exists():
-        return True
-
-    if _current_branch() in MAINLINE_BRANCHES:
-        return True
-
-    return _is_merge_commit(commit)
+    del commit
+    return _current_branch() in MAINLINE_BRANCHES
 
 
 class RegularTitleRule(CommitRule):
