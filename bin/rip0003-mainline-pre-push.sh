@@ -47,21 +47,21 @@ resolve_commit_list(){
   if [[ -n "${PRE_COMMIT_FROM_REF:-}" && -n "${PRE_COMMIT_TO_REF:-}" &&
         "${PRE_COMMIT_FROM_REF}" != "$zero_ref" &&
         "${PRE_COMMIT_TO_REF}" != "$zero_ref" ]]; then
-    git rev-list --reverse "${PRE_COMMIT_FROM_REF}..${PRE_COMMIT_TO_REF}"
+    git rev-list --reverse --first-parent "${PRE_COMMIT_FROM_REF}..${PRE_COMMIT_TO_REF}"
     return
   fi
 
   if [[ -n "${PRE_COMMIT_TO_REF:-}" && "${PRE_COMMIT_TO_REF}" != "$zero_ref" ]]; then
-    git rev-list --reverse "${PRE_COMMIT_TO_REF}"
+    git rev-list --reverse --first-parent "${PRE_COMMIT_TO_REF}"
     return
   fi
 
   if [[ -n "${PRE_COMMIT_LOCAL_BRANCH:-}" ]]; then
-    git rev-list --reverse "${PRE_COMMIT_LOCAL_BRANCH}"
+    git rev-list --reverse --first-parent "${PRE_COMMIT_LOCAL_BRANCH}"
     return
   fi
 
-  git rev-list --reverse HEAD
+  git rev-list --reverse --first-parent HEAD
 }
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

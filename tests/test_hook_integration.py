@@ -1,9 +1,8 @@
+import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-import shutil
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HOOK_SNAPSHOT_ITEMS = [
@@ -336,7 +335,9 @@ class HookIntegrationTests(unittest.TestCase):
 
         self.assert_fails_with(result, "Title exceeds max length")
 
-    def test_feature_branch_commit_rejects_body_line_longer_than_seventy_two_characters(self):
+    def test_feature_branch_commit_rejects_body_line_longer_than_seventy_two_characters(
+        self,
+    ):
         repo = self.make_consumer_repo()
         self.run_cmd(["git", "checkout", "-b", "feature"], cwd=repo)
         self.stage_change(repo)
@@ -631,6 +632,36 @@ class HookIntegrationTests(unittest.TestCase):
             result,
             "Merge commits must start with 'feat: ' or 'fix: '",
         )
+
+    def test_pre_push_ignores_feature_branch_ancestor_commits_in_no_ff_merge(self):
+        repo = self.make_pre_push_repo()
+        before_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        self.run_cmd(["git", "checkout", "-b", "feature"], cwd=repo)
+        self.stage_change(repo, content="feature change\n")
+        result = self.git_commit(repo, VALID_REGULAR_MESSAGE)
+        self.assertEqual(0, result.returncode, msg=self.combined_output(result))
+        self.run_cmd(["git", "checkout", "main"], cwd=repo)
+
+        result = self.git_merge(repo, "feature", VALID_MAIN_MESSAGE)
+        self.assertEqual(0, result.returncode, msg=self.combined_output(result))
+        after_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        result = self.run_pre_push(
+            repo,
+            remote_branch="refs/heads/main",
+            local_branch="refs/heads/main",
+            from_ref=before_push,
+            to_ref=after_push,
+        )
+
+        self.assert_passes(result)
 
     def test_pre_push_initial_mainline_push_uses_local_branch_history(self):
         repo = self.make_pre_push_repo(seed_message=VALID_MAIN_MESSAGE)
