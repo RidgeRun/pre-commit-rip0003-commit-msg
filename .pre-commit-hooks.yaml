@@ -5,3 +5,13 @@
   stages: [commit-msg]
   description: |
       Validates that commit messages follow the RIP 3 standard.
+
+- id: rip0003-mainline-pre-push
+  name: RIP 3 - Mainline Push Commit Message Standard
+  entry: bin/rip0003-mainline-pre-push.sh
+  language: script
+  stages: [pre-push]
+  pass_filenames: false
+  always_run: true
+  description: |
+      Validates every new commit pushed to a mainline branch.

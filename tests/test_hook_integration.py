@@ -11,7 +11,8 @@ HOOK_SNAPSHOT_ITEMS = [
     ".pre-commit-hooks.yaml",
     "README.md",
     "bin",
-    "gitlint",
+    "gitlint/__init__.py",
+    "gitlint/rip0003.py",
 ]
 VALID_REGULAR_MESSAGE = (
     "Avoid unnecessary map copies with rvalues\n\n"
@@ -41,6 +42,7 @@ class HookIntegrationTests(unittest.TestCase):
         for item in HOOK_SNAPSHOT_ITEMS:
             src = REPO_ROOT / item
             dst = cls.hook_repo_root / item
+            dst.parent.mkdir(parents=True, exist_ok=True)
             if src.is_dir():
                 shutil.copytree(src, dst)
             else:
@@ -92,6 +94,25 @@ class HookIntegrationTests(unittest.TestCase):
         )
 
     def make_consumer_repo(self) -> Path:
+        return self.make_configured_consumer_repo(
+            hook_ids=("rip0003-commit-msg",),
+            install_hook_types=("commit-msg",),
+        )
+
+    def make_pre_push_repo(self, *, seed_message: str = "Seed repository") -> Path:
+        return self.make_configured_consumer_repo(
+            hook_ids=("rip0003-mainline-pre-push",),
+            install_hook_types=("pre-push",),
+            seed_message=seed_message,
+        )
+
+    def make_configured_consumer_repo(
+        self,
+        *,
+        hook_ids: tuple[str, ...],
+        install_hook_types: tuple[str, ...],
+        seed_message: str = "Seed repository",
+    ) -> Path:
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         repo = Path(temp_dir.name)
@@ -101,20 +122,23 @@ class HookIntegrationTests(unittest.TestCase):
 
         (repo / "README.md").write_text("seed\n")
         self.run_cmd(["git", "add", "README.md"], cwd=repo)
-        self.run_cmd(["git", "commit", "-m", "Seed repository"], cwd=repo)
+        self.run_cmd(["git", "commit", "-m", seed_message], cwd=repo)
 
-        config = (
-            "repos:\n"
-            f"  - repo: {self.hook_repo_root}\n"
-            f"    rev: {self.hook_rev}\n"
-            "    hooks:\n"
-            "      - id: rip0003-commit-msg\n"
-        )
+        config_lines = [
+            "repos:",
+            f"  - repo: {self.hook_repo_root}",
+            f"    rev: {self.hook_rev}",
+            "    hooks:",
+        ]
+        config_lines.extend(f"      - id: {hook_id}" for hook_id in hook_ids)
+        config = "\n".join(config_lines) + "\n"
         (repo / ".pre-commit-config.yaml").write_text(config)
-        self.run_cmd(
-            ["pre-commit", "install", "--hook-type", "commit-msg"],
-            cwd=repo,
-        )
+
+        for hook_type in install_hook_types:
+            self.run_cmd(
+                ["pre-commit", "install", "--hook-type", hook_type],
+                cwd=repo,
+            )
 
         return repo
 
@@ -155,6 +179,48 @@ class HookIntegrationTests(unittest.TestCase):
             cwd=repo,
             check=False,
         )
+
+    def git_allow_empty_commit(
+        self,
+        repo: Path,
+        message: str,
+    ) -> subprocess.CompletedProcess[str]:
+        message_path = repo / "empty-commit-message.txt"
+        message_path.write_text(message)
+        return self.run_cmd(
+            ["git", "commit", "--allow-empty", "-F", str(message_path)],
+            cwd=repo,
+            check=False,
+        )
+
+    def run_pre_push(
+        self,
+        repo: Path,
+        *,
+        remote_branch: str,
+        local_branch: str,
+        from_ref: str | None = None,
+        to_ref: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        cmd = [
+            "pre-commit",
+            "run",
+            "--hook-stage",
+            "pre-push",
+            "rip0003-mainline-pre-push",
+            "--remote-name",
+            "origin",
+            "--remote-url",
+            "git@example.com:repo.git",
+            "--remote-branch",
+            remote_branch,
+            "--local-branch",
+            local_branch,
+        ]
+        if from_ref is not None and to_ref is not None:
+            cmd.extend(["--from-ref", from_ref, "--to-ref", to_ref])
+
+        return self.run_cmd(cmd, cwd=repo, check=False)
 
     def create_feature_branch_commit(
         self,
@@ -458,3 +524,123 @@ class HookIntegrationTests(unittest.TestCase):
             result,
             "Regular commits must not contain 'BREAKING CHANGE: ...'",
         )
+
+    def test_pre_push_skips_non_mainline_branch(self):
+        repo = self.make_pre_push_repo()
+        before_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        self.run_cmd(["git", "checkout", "-b", "feature"], cwd=repo)
+        self.stage_change(repo)
+        result = self.git_commit(repo, VALID_REGULAR_MESSAGE)
+        self.assert_passes(result)
+        after_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        result = self.run_pre_push(
+            repo,
+            remote_branch="refs/heads/feature",
+            local_branch="refs/heads/feature",
+            from_ref=before_push,
+            to_ref=after_push,
+        )
+
+        self.assert_passes(result)
+
+    def test_pre_push_accepts_valid_mainline_range(self):
+        repo = self.make_pre_push_repo()
+        before_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        self.stage_change(repo)
+        result = self.git_commit(repo, VALID_MAIN_MESSAGE)
+        self.assert_passes(result)
+        after_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        result = self.run_pre_push(
+            repo,
+            remote_branch="refs/heads/main",
+            local_branch="refs/heads/main",
+            from_ref=before_push,
+            to_ref=after_push,
+        )
+
+        self.assert_passes(result)
+
+    def test_pre_push_rejects_invalid_mainline_commit(self):
+        repo = self.make_pre_push_repo()
+        before_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        result = self.git_allow_empty_commit(repo, VALID_REGULAR_MESSAGE)
+        self.assertEqual(0, result.returncode, msg=self.combined_output(result))
+        after_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        result = self.run_pre_push(
+            repo,
+            remote_branch="refs/heads/main",
+            local_branch="refs/heads/main",
+            from_ref=before_push,
+            to_ref=after_push,
+        )
+
+        self.assert_fails_with(
+            result,
+            "Merge commits must start with 'feat: ' or 'fix: '",
+        )
+
+    def test_pre_push_checks_every_commit_in_mainline_range(self):
+        repo = self.make_pre_push_repo()
+        before_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        result = self.git_allow_empty_commit(repo, VALID_MAIN_MESSAGE)
+        self.assertEqual(0, result.returncode, msg=self.combined_output(result))
+        result = self.git_allow_empty_commit(repo, VALID_REGULAR_MESSAGE)
+        self.assertEqual(0, result.returncode, msg=self.combined_output(result))
+        after_push = self.run_cmd(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+        ).stdout.strip()
+
+        result = self.run_pre_push(
+            repo,
+            remote_branch="refs/heads/main",
+            local_branch="refs/heads/main",
+            from_ref=before_push,
+            to_ref=after_push,
+        )
+
+        self.assert_fails_with(
+            result,
+            "Merge commits must start with 'feat: ' or 'fix: '",
+        )
+
+    def test_pre_push_initial_mainline_push_uses_local_branch_history(self):
+        repo = self.make_pre_push_repo(seed_message=VALID_MAIN_MESSAGE)
+        result = self.git_allow_empty_commit(repo, VALID_MAIN_MESSAGE)
+        self.assertEqual(0, result.returncode, msg=self.combined_output(result))
+
+        result = self.run_pre_push(
+            repo,
+            remote_branch="refs/heads/main",
+            local_branch="refs/heads/main",
+        )
+
+        self.assert_passes(result)
